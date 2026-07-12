@@ -1,4 +1,6 @@
-﻿using Encypter.Data;
+using Encypter.Data;
+using Encypter.Records;
+using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
 
@@ -8,24 +10,27 @@ namespace Encypter
     {
         public Validate() { }
 
-        public string SetPassword(string password)
+        public bool ValidatePassword(string password)
         {
-
-            var attempts = 0;
-
-            while (string.IsNullOrEmpty(password) || !PasswordIsValid(password))
+            try
             {
-                Console.WriteLine("Invalid  Password. Please enter a valid Master Password.");
-                password = Console.ReadLine();
-                attempts++;
-                        
-                if (attempts >= Config.WhileLoopSanityCheck)
+                var sanityCheck = new WhileLoopSanityCheck();
+
+                while (string.IsNullOrEmpty(password) || !PasswordIsValid(password))
                 {
-                    throw new InvalidOperationException("Too many invalid attempts.");
+                    Console.WriteLine("Invalid  Password. Please enter a valid Master Password.");
+                    password = Console.ReadLine();
+
+                    sanityCheck.ValidateAttempts();
                 }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                throw new Exception("An error occurred while validating the password.", e); 
             }
 
-            return password;
         }
 
         public bool PasswordIsValid(string password)
@@ -66,21 +71,6 @@ namespace Encypter
                 }
             }
             return false;
-        }
-
-        public bool ValidateFileExists(string filePath)
-        {
-            if (string.IsNullOrEmpty(filePath))
-            {
-                Console.WriteLine("File path cannot be empty.");
-                return false;
-            }
-            if (!Directory.Exists(filePath))
-            {
-                Console.WriteLine("The specified directory does not exist.");
-                return false;
-            }
-            return true;
         }
     }
 }

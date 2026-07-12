@@ -1,39 +1,35 @@
-﻿using Encypter.Data;
-using System;
-using System.Threading;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Encypter
 {
     internal class Program
     {
-
         internal static void Main(string[] args)
         {
-            var cancellation = new CancellationTokenSource();
-
-            Console.WriteLine("===== Encryter App Started =====");
-
-            var startUp = new StartUp();
-            startUp.Initialise();
-
-            var master = Environment.GetEnvironmentVariable(Config.MasterPasswordEnvVar, EnvironmentVariableTarget.User);
-            var process = new Process();
-
-            while (!cancellation.Token.IsCancellationRequested)
-            {
-                process.Start(master);
-
-                Console.WriteLine("Enter 'exit' to close the application.");
-                var input = Console.ReadLine();
-
-                if (input?.ToLower() == "exit")
+            var host = Host.CreateDefaultBuilder(args)
+                .ConfigureLogging(logging =>
                 {
-                    cancellation.Cancel();
-                }
-            }
+                    logging.ClearProviders();
+                    logging.AddConsole();
+                })
+                .ConfigureServices((context, services) =>
+                {
+                    services.AddSingleton<StartUp>();
+                    services.AddSingleton<EncryptionService>();
+                    services.AddSingleton<Validate>();
+                    //TODO: add IEncryptor, AesGcmEncryptor
+                }).Build();
 
-            Console.WriteLine("Thank you, Press any key to exit...");
-            Console.ReadKey();
+            ILogger<Program> logger = host.Services.GetRequiredService<ILogger<Program>>();
+
+            Validate? validate = host.Services.GetRequiredService<Validate>();
+            StartUp? startup = host.Services.GetRequiredService<StartUp>();
+            EncryptionService? encryptionService = host.Services.GetRequiredService<EncryptionService>();
+
+            startup.Initialise(logger, validate);
+            encryptionService.Start(logger, validate);
         }
     }
 }

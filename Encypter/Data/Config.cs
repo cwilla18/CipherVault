@@ -2,7 +2,7 @@ namespace Encypter.Data
 {
     internal static class Config
     {
-        public const string MasterPasswordEnvVar = "Cw-Encrypter";
+        public const string DpapiFileName = "Cwd.dat";
         public const int WhileLoopSanityCheck = 1000;
         public const int Increment = 3;
         public const int ChunkingSize = 4;
