@@ -1,6 +1,6 @@
-# Contributing to Encypter
+# Contributing to CipherVault
 
-Thank you for your interest in contributing to Encypter. This document describes the repository standards, workflow, and expectations for contributions.
+Thank you for your interest in contributing to CipherVault. This document describes the repository standards, workflow, and expectations for contributions.
 
 ## Repository workflow
 
@@ -67,4 +67,4 @@ Keep messages concise and reference issue numbers when applicable.
 
 ## Thank you
 
-Thanks for taking the time to contribute. Your efforts help keep Encypter useful and secure.
+Thanks for taking the time to contribute. Your efforts help keep CipherVault useful and secure.

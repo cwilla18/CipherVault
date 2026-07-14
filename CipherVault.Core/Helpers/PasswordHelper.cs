@@ -1,23 +1,13 @@
-using Encypter.Data;
-using Encypter.Records;
-using Microsoft.Extensions.Logging;
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Security;
-using System.Security.Cryptography;
+using CipherVault.Core.Records;
+using Microsoft.Extensions.Logging;
 
-namespace Encypter.Helpers;
+namespace CipherVault.Core.Helpers;
 
-internal static class PasswordHelper
+public static class PasswordHelper
 {
-    private static string _filePath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Config.DpapiFileName);
-
-    public static bool IsMasterPasswordSet(ILogger logger)
-    {
-        return File.Exists(_filePath);
-    }
-
     public static SecureString ProcessPassewordInput(string inputMessage, ILogger logger)
     {
         try
@@ -61,8 +51,8 @@ internal static class PasswordHelper
         }
         catch (Exception ex)
         {
-            logger.LogError($"An error occurred while processing the password input: {ex.Message}");
-            return null;
+            logger.LogError($"An error occurred while processing the password input: {ex}");
+            throw;
         }
     }
 
@@ -79,7 +69,8 @@ internal static class PasswordHelper
             try
             {
                 unmanagedString = Marshal.SecureStringToGlobalAllocUnicode(secureString);
-                return Marshal.PtrToStringUni(unmanagedString);
+                return Marshal.PtrToStringUni(unmanagedString)
+                    ?? throw new InvalidOperationException("Failed to read the SecureString contents.");
             }
             finally
             {
@@ -88,40 +79,8 @@ internal static class PasswordHelper
         }
         catch (Exception ex)
         {
-            logger.LogError($"An error occurred while converting SecureString to string: {ex.Message}");
-            return null;
-        }
-    }
-
-    public static void SaveMasterPassword(SecureString secureString, ILogger logger)
-    {
-        try
-        {
-            SaveToSecretManager(secureString);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Error saving master password: {ex.Message}");
+            logger.LogError($"An error occurred while converting SecureString to string: {ex}");
             throw;
-        }
-    }
-
-    private static void SaveToSecretManager(SecureString secureString)
-    {
-        var bstrPtr = Marshal.SecureStringToBSTR(secureString);
-        try
-        {
-            var length = Marshal.ReadInt32(bstrPtr - 4);
-            var plainBytes = new byte[length];
-            Marshal.Copy(bstrPtr, plainBytes, 0, length);
-
-            var encryptedBytes = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
-
-            File.WriteAllBytes(_filePath, encryptedBytes);
-        }
-        finally
-        {
-            Marshal.ZeroFreeBSTR(bstrPtr);
         }
     }
 }

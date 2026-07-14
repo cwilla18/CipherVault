@@ -1,8 +1,11 @@
+using CipherVault.Core;
+using CipherVault.Core.Interfaces;
+using CipherVault.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Encypter
+namespace CipherVault
 {
     internal class Program
     {
@@ -16,20 +19,22 @@ namespace Encypter
                 })
                 .ConfigureServices((context, services) =>
                 {
-                    services.AddSingleton<StartUp>();
-                    services.AddSingleton<EncryptionService>();
-                    services.AddSingleton<Validate>();
-                    //TODO: add IEncryptor, AesGcmEncryptor
+                    // Register Validate as IValidate (separate validation service)
+                    services.AddTransient<IValidate, Validate>();
+
+                    // Register the cipher
+                    services.AddTransient<ICipher, AesGcmCipher>();
+
+                    // Register EncryptionService as itself
+                    services.AddTransient<EncryptionService>();
                 }).Build();
+
 
             ILogger<Program> logger = host.Services.GetRequiredService<ILogger<Program>>();
 
-            Validate? validate = host.Services.GetRequiredService<Validate>();
-            StartUp? startup = host.Services.GetRequiredService<StartUp>();
-            EncryptionService? encryptionService = host.Services.GetRequiredService<EncryptionService>();
+            EncryptionService encryptionService = host.Services.GetRequiredService<EncryptionService>();
 
-            startup.Initialise(logger, validate);
-            encryptionService.Start(logger, validate);
+            encryptionService.Start(logger);
         }
     }
 }
