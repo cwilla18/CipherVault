@@ -30,28 +30,31 @@ public static class FileHelper
         return Directory.GetFiles(filePath, "*", SearchOption.AllDirectories).ToList();
     }
 
-    public static void CreateEncryptedZip(string sourceFolder, string zipPath, string password, ILogger logger)
+    /// <summary>
+    /// Packages <paramref name="sourceFolder"/> into a plain (unencrypted) zip
+    /// container at "{sourceFolder}.zip". Confidentiality and integrity are
+    /// provided by the per-file AES-GCM .cwe layer; the zip is purely structural.
+    /// </summary>
+    public static void CreateZip(string sourceFolder, ILogger logger)
     {
+        var zipPath = $"{sourceFolder}.zip";
         using (ZipFile zip = new ZipFile())
         {
-            zip.Password = password;
-            zip.Encryption = EncryptionAlgorithm.WinZipAes256;
-            zip.AddDirectory(zipPath);
-            zip.Save($"{sourceFolder}.zip");
+            zip.AddDirectory(sourceFolder);
+            zip.Save(zipPath);
         }
 
-        logger.LogInformation($"Created password-protected ZIP: {zipPath}");
+        logger.LogInformation("Created archive: {ZipPath}", zipPath);
     }
 
-    public static void ExtractEncryptedZip(string zipFilePath, string destinationFolder, string password, ILogger logger)
+    public static void ExtractZip(string zipFilePath, string destinationFolder, ILogger logger)
     {
         using (ZipFile zip = ZipFile.Read(zipFilePath))
         {
-            zip.Password = password;
             zip.ExtractAll(destinationFolder, ExtractExistingFileAction.OverwriteSilently);
         }
 
-        logger.LogInformation($"Extracted password-protected ZIP: {zipFilePath}");
+        logger.LogInformation("Extracted archive: {ZipPath}", zipFilePath);
     }
 
     public static void DeleteDirectory(string directoryPath, ILogger logger)
@@ -59,11 +62,11 @@ public static class FileHelper
         if (Directory.Exists(directoryPath))
         {
             Directory.Delete(directoryPath, true);
-            logger.LogInformation($"Deleted directory: {directoryPath}");
+            logger.LogInformation("Deleted directory: {DirectoryPath}", directoryPath);
         }
         else
         {
-            logger.LogInformation($"Directory does not exist: {directoryPath}");
+            logger.LogInformation("Directory does not exist: {DirectoryPath}", directoryPath);
         }
     }
 }

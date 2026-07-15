@@ -14,6 +14,28 @@ public static class CweFileFormat
     private static int HeaderLength =>
         Magic.Length + 1 + sizeof(int) + Config.SaltSize + Config.NonceSize + Config.TagSize;
 
+    /// <summary>
+    /// Builds the associated data bound to the AES-GCM tag: magic + version +
+    /// iterations + salt. Passing this on encrypt and decrypt makes the tag
+    /// detect tampering with (or swapping of) a file's header fields.
+    /// </summary>
+    public static byte[] BuildAssociatedData(byte[] salt, int iterations)
+    {
+        ArgumentNullException.ThrowIfNull(salt);
+        if (salt.Length != Config.SaltSize)
+            throw new ArgumentException($"Salt must be {Config.SaltSize} bytes.", nameof(salt));
+
+        var ad = new byte[Magic.Length + 1 + sizeof(int) + salt.Length];
+        var span = ad.AsSpan();
+        Magic.CopyTo(span);
+        var offset = Magic.Length;
+        span[offset++] = CurrentVersion;
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(offset, sizeof(int)), iterations);
+        offset += sizeof(int);
+        salt.CopyTo(span.Slice(offset));
+        return ad;
+    }
+
     public static void Write(Stream output, byte[] salt, int iterations, EncryptedPayload payload)
     {
         ArgumentNullException.ThrowIfNull(output);

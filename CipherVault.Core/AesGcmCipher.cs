@@ -8,12 +8,8 @@ namespace CipherVault.Core;
 
 public sealed class AesGcmCipher : ICipher
 {
-    public byte[] DeriveKeyFromPassword(string password, ReadOnlySpan<byte> salt, int iterations = 100000)
+    public byte[] DeriveKeyFromPassword(ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, int iterations = 700_000)
     {
-        if (password is null)
-        {
-            throw new ArgumentNullException(nameof(password));
-        }
         if (salt.Length == 0)
         {
             throw new ArgumentException("Salt must not be empty.", nameof(salt));
@@ -23,8 +19,9 @@ public sealed class AesGcmCipher : ICipher
             throw new ArgumentOutOfRangeException(nameof(iterations));
         }
 
-        using var derive = new Rfc2898DeriveBytes(password, salt.ToArray(), iterations, HashAlgorithmName.SHA256);
-        return derive.GetBytes(Config.KeySize);
+        // Static Pbkdf2 avoids constructing an Rfc2898DeriveBytes that would
+        // hold onto the password bytes for the lifetime of the object.
+        return Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, Config.KeySize);
     }
 
     EncryptedPayload ICipher.Encrypt(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> key)

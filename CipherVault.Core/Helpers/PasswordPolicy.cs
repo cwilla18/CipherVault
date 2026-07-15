@@ -1,10 +1,14 @@
+using System;
+
 namespace CipherVault.Core.Helpers;
 
 public static class PasswordPolicy
 {
-    public static bool IsValid(string password)
+    public static bool IsValid(string? password) => password is not null && IsValid(password.AsSpan());
+
+    public static bool IsValid(ReadOnlySpan<char> password)
     {
-        if (string.IsNullOrEmpty(password) || password.Length < 10)
+        if (password.Length < 10)
         {
             return false;
         }

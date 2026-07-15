@@ -1,77 +1,115 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Security.Cryptography;
 using CipherVault.Core.Data;
 using CipherVault.Core.Formats;
 using CipherVault.Core.Helpers;
 using CipherVault.Core.Interfaces;
-using CipherVault.Core.Records;
-using CipherVault.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace CipherVault;
 
-internal class EncryptionService : IValidate
+internal class EncryptionService
 {
-    private readonly IValidate _validate;
     private readonly ICipher _cipher;
+    private readonly IConsoleUi _ui;
 
-    public EncryptionService(IValidate validate, ICipher cipher)
+    public EncryptionService(ICipher cipher, IConsoleUi ui)
     {
-        _validate = validate;
         _cipher = cipher;
+        _ui = ui;
     }
 
     public void Start(ILogger logger)
     {
         try
         {
-            var sanityCheck = new WhileLoopSanityCheck();
-            SecureString? secureFilePassword = new SecureString();
+            _ui.Section("Select folder");
+            var filePath = _ui.PromptExistingDirectory("Enter the path to the folder you want to encrypt:");
 
-            Console.WriteLine("Please add the file path to the folder you want to encrypt?");
-            var filePath = Console.ReadLine();
+            _ui.Section("Set password");
 
-            while (!FileHelper.ValidateFileExists(filePath, logger))
+            // Held only as a SecureString; converted to transient bytes inside
+            // PasswordHelper.UsePasswordBytes and zeroed straight after derivation.
+            using var secure = ReadValidPassword();
+
+            _ui.Info("Password accepted. Preparing files...");
+
+            var stopwatch = Stopwatch.StartNew();
+
+            var salt = RandomNumberGenerator.GetBytes(Config.SaltSize);
+            var associatedData = CweFileFormat.BuildAssociatedData(salt, Config.KdfIterations);
+
+            var copiedFilePath = CreateFolderAndCopyContent(filePath, logger);
+
+            if (string.IsNullOrEmpty(copiedFilePath))
             {
-                Console.WriteLine("File path is invalid. Please try again.");
-                filePath = Console.ReadLine();
-
-                sanityCheck.ValidateAttempts();
+                _ui.Warn("No files found in that folder. Nothing to encrypt.");
+                return;
             }
 
-            secureFilePassword = PasswordHelper.ProcessPassewordInput("Please enter the password to encrypt the file. \n This must be 10 Charaters Long and contain at least one uppercase letter, one lowercase letter, one digit, and one special character.", logger);
-            var filePassword = PasswordHelper.ConvertFromnSecureString(secureFilePassword, logger);
+            // Derive the encryption key from the password bytes and random salt.
+            var encryptionKey = PasswordHelper.UsePasswordBytes(secure,
+                pw => _cipher.DeriveKeyFromPassword(pw, salt, Config.KdfIterations));
 
-            if (_validate.ValidatePassword(filePassword))
+            _ui.Section("Encrypting");
+            var encryptedCount = EncryptFiles(copiedFilePath, encryptionKey, salt, associatedData, logger);
+
+            var zipPath = $"{copiedFilePath}.zip";
+            FileHelper.CreateZip(copiedFilePath, logger);
+
+            // Only remove the working folder once the archive is confirmed on disk.
+            if (!File.Exists(zipPath))
+                throw new IOException($"Archive was not created at {zipPath}; keeping working folder.");
+
+            FileHelper.DeleteDirectory(copiedFilePath, logger);
+
+            stopwatch.Stop();
+
+            _ui.Summary("Encryption complete", new List<(string, string)>
             {
-                logger.LogInformation("File Password is valid. \n Starting to process file.");
+                ("Files encrypted", encryptedCount.ToString()),
+                ("Output", zipPath),
+                ("Elapsed", $"{stopwatch.Elapsed.TotalSeconds:F1}s"),
+            });
 
-                var salt = RandomNumberGenerator.GetBytes(Config.SaltSize);
-
-                // Derive encryption key from the password and the random salt.
-                var encryptionKey = _cipher.DeriveKeyFromPassword(filePassword, salt, Config.KdfIterations);
-
-                var copiedFilePath = CreateFolderAndCopyContent(filePath!, logger);
-
-                // Now encrypt the file content
-                EncryptFiles(copiedFilePath, encryptionKey, salt, logger);
-
-                FileHelper.CreateEncryptedZip(copiedFilePath, copiedFilePath, filePassword, logger);
-
-                FileHelper.DeleteDirectory(copiedFilePath, logger);
-
-                //Dispose of File Password
-                filePassword = string.Empty;
-                //Dispose of secureFilePassword
-                secureFilePassword.Dispose();
-            }
+            _ui.Success("Your files are encrypted. Keep your password safe - it cannot be recovered.");
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error in process: {ex}");
+            logger.LogError(ex, "Error during encryption.");
+            _ui.Error("Encryption failed. See the log for details.");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Prompts (masked, with confirmation) until the entered password satisfies
+    /// the password policy, then returns it as a read-only <see cref="SecureString"/>.
+    /// </summary>
+    private SecureString ReadValidPassword()
+    {
+        _ui.Info("Password must be at least 10 characters and include an uppercase letter,");
+        _ui.Info("a lowercase letter, a digit and a special character.");
+
+        while (true)
+        {
+            SecureString secure = _ui.ReadSecretConfirmed(
+                "Enter a password to encrypt the files:",
+                "Confirm the password:");
+
+            var isValid = PasswordHelper.UsePasswordChars(secure, chars => PasswordPolicy.IsValid(chars));
+            if (isValid)
+            {
+                return secure;
+            }
+
+            secure.Dispose();
+            _ui.Warn("That password does not meet the policy. Please try again.");
         }
     }
 
@@ -80,29 +118,32 @@ internal class EncryptionService : IValidate
         var sourceName = $"{Path.GetFileName(sourceFilePath)}_encrypted";
         var destinationFolder = Path.Combine(sourceFilePath, sourceName);
 
-        if (!Directory.Exists(destinationFolder))
-        {
-            Directory.CreateDirectory(destinationFolder);
-        }
+        Directory.CreateDirectory(destinationFolder);
 
-        var dirctoryFiles = FileHelper.GetFilesFromDirectory(sourceFilePath);
+        // Exclude the output folder so a re-run does not ingest its own .cwe/zip.
+        var directoryFiles = FileHelper.GetFilesFromDirectory(sourceFilePath)
+            .Where(f => !f.StartsWith(destinationFolder, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-        if (dirctoryFiles.Count == 0)
+        if (directoryFiles.Count == 0)
         {
             logger.LogInformation("No files found in the source directory.");
             return string.Empty;
         }
 
-        foreach (var file in dirctoryFiles)
+        foreach (var file in directoryFiles)
         {
-            var destinationFilePath = Path.Combine(destinationFolder, Path.GetFileName(file));
+            // Preserve the source tree so files in different subfolders can't collide.
+            var relativePath = Path.GetRelativePath(sourceFilePath, file);
+            var destinationFilePath = Path.Combine(destinationFolder, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationFilePath)!);
             File.Copy(file, destinationFilePath, true);
         }
 
         return destinationFolder;
     }
 
-    private void EncryptFiles(string filePath, byte[] encryptionKey, byte[] salt, ILogger logger)
+    private int EncryptFiles(string filePath, byte[] encryptionKey, byte[] salt, byte[] associatedData, ILogger logger)
     {
         var files = FileHelper.GetFilesFromDirectory(filePath);
 
@@ -111,8 +152,10 @@ internal class EncryptionService : IValidate
             throw new FileNotFoundException($"No files found in the specified path: {filePath}");
         }
 
-        foreach (var file in files)
+        var encrypted = 0;
+        for (var i = 0; i < files.Count; i++)
         {
+            var file = files[i];
             var attributes = File.GetAttributes(file);
 
             if (attributes.HasFlag(FileAttributes.Hidden))
@@ -122,20 +165,29 @@ internal class EncryptionService : IValidate
 
             var fileBytes = File.ReadAllBytes(file);
 
-            if (fileBytes.Length == 0)
-            {
-                throw new Exception($"File {file} is empty");
-            }
-
-            // Encrypt the file content
-            var encryptedPayload = _cipher.Encrypt(fileBytes, ReadOnlySpan<byte>.Empty, encryptionKey);
+            // Encrypt the file content, binding the header as associated data.
+            var encryptedPayload = _cipher.Encrypt(fileBytes, associatedData, encryptionKey);
 
             var outputPath = file + ".cwe";
-            using var outputStream = File.Create(outputPath);
+            using (var outputStream = File.Create(outputPath))
+            {
+                CweFileFormat.Write(outputStream, salt, Config.KdfIterations, encryptedPayload);
+            }
 
-            CweFileFormat.Write(outputStream, salt, Config.KdfIterations, encryptedPayload);
+            // Verify the vault is recoverable before we ever delete a plaintext file.
+            using (var verifyStream = File.OpenRead(outputPath))
+            {
+                var roundTrip = CweFileFormat.Read(verifyStream);
+                var verifyAd = CweFileFormat.BuildAssociatedData(roundTrip.Salt, roundTrip.Iterations);
+                var check = _cipher.Decrypt(roundTrip.Payload, verifyAd, encryptionKey);
+                if (!check.SequenceEqual(fileBytes))
+                    throw new CryptographicException(
+                        $"Verification failed for {outputPath}; leaving original in place.");
+            }
 
-            logger.LogInformation($"File encrypted successfully: {outputPath}");
+            encrypted++;
+            _ui.Progress(i + 1, files.Count, Path.GetFileName(file));
+            logger.LogInformation("File encrypted: {OutputPath}", outputPath);
         }
 
         foreach (var file in files)
@@ -150,6 +202,7 @@ internal class EncryptionService : IValidate
             File.Delete(file);
         }
 
-        logger.LogInformation($"All files in the specified path have been encrypted successfully: {filePath}");
+        logger.LogInformation("All files encrypted under: {FilePath}", filePath);
+        return encrypted;
     }
 }

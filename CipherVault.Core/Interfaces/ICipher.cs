@@ -9,5 +9,5 @@ public interface ICipher
 
     byte[] Decrypt(EncryptedPayload payload, ReadOnlySpan<byte> associatedData, ReadOnlySpan<byte> key);
 
-    byte[] DeriveKeyFromPassword(string password, ReadOnlySpan<byte> salt, int iterations = 100_000);
+    byte[] DeriveKeyFromPassword(ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, int iterations = 700_000);
 }

@@ -1,86 +1,64 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Security;
-using CipherVault.Core.Records;
-using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace CipherVault.Core.Helpers;
 
 public static class PasswordHelper
 {
-    public static SecureString ProcessPassewordInput(string inputMessage, ILogger logger)
+    /// <summary>
+    /// Exposes the password as a transient <c>char[]</c> to <paramref name="action"/>
+    /// and zeroes it (and the unmanaged copy) before returning. The password is
+    /// never materialised as an immutable managed <see cref="string"/>, which
+    /// could not be wiped and would linger on the GC heap.
+    /// </summary>
+    public static T UsePasswordChars<T>(SecureString secureString, Func<char[], T> action)
     {
+        ArgumentNullException.ThrowIfNull(secureString);
+        ArgumentNullException.ThrowIfNull(action);
+
+        var bstr = Marshal.SecureStringToGlobalAllocUnicode(secureString);
+        char[]? chars = null;
         try
         {
-            var secureString = new SecureString();
-            ConsoleKeyInfo keyInfo;
-            var sanityCheck = new WhileLoopSanityCheck();
-
-            Console.WriteLine(inputMessage);
-
-            while (true)
-            {
-                keyInfo = Console.ReadKey(intercept: true);
-
-                if (keyInfo.Key == ConsoleKey.Enter)
-                {
-                    break;
-                }
-
-                if (keyInfo.Key == ConsoleKey.Backspace)
-                {
-                    if (secureString.Length > 0)
-                    {
-                        secureString.RemoveAt(secureString.Length - 1);
-                        Console.Write("\b \b");
-                    }
-                }
-
-                else if (!char.IsControl(keyInfo.KeyChar))
-                {
-                    secureString.AppendChar(keyInfo.KeyChar);
-                    Console.Write("*");
-                }
-
-                sanityCheck.ValidateAttempts();
-
-            }
-            secureString.MakeReadOnly();
-
-            return secureString;
+            chars = new char[secureString.Length];
+            Marshal.Copy(bstr, chars, 0, secureString.Length);
+            return action(chars);
         }
-        catch (Exception ex)
+        finally
         {
-            logger.LogError($"An error occurred while processing the password input: {ex}");
-            throw;
+            if (chars is not null)
+            {
+                Array.Clear(chars);
+            }
+            Marshal.ZeroFreeGlobalAllocUnicode(bstr);
         }
     }
 
-    public static string ConvertFromnSecureString(SecureString secureString, ILogger logger)
+    /// <summary>
+    /// Exposes the password as transient UTF-8 <c>byte[]</c> to <paramref name="action"/>
+    /// (for key derivation) and zeroes it before returning.
+    /// </summary>
+    public static T UsePasswordBytes<T>(SecureString secureString, Func<byte[], T> action)
     {
-        try
-        {
-            if (secureString == null)
-            {
-                throw new ArgumentNullException(nameof(secureString), "SecureString cannot be null.");
-            }
+        ArgumentNullException.ThrowIfNull(action);
 
-            var unmanagedString = nint.Zero;
+        return UsePasswordChars(secureString, chars =>
+        {
+            byte[]? bytes = null;
             try
             {
-                unmanagedString = Marshal.SecureStringToGlobalAllocUnicode(secureString);
-                return Marshal.PtrToStringUni(unmanagedString)
-                    ?? throw new InvalidOperationException("Failed to read the SecureString contents.");
+                bytes = Encoding.UTF8.GetBytes(chars);
+                return action(bytes);
             }
             finally
             {
-                Marshal.ZeroFreeGlobalAllocUnicode(unmanagedString);
+                if (bytes is not null)
+                {
+                    Array.Clear(bytes);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"An error occurred while converting SecureString to string: {ex}");
-            throw;
-        }
+        });
     }
 }

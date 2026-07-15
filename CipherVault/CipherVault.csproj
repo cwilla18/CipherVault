@@ -14,4 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CipherVault.Core\CipherVault.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tests" />
+  </ItemGroup>
 </Project>
